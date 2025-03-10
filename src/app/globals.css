@@ -2,20 +2,99 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --primary: 139 92 246;
+    --primary-foreground: 255 255 255;
+  }
+
+  .dark {
+    --primary: 168 85 247;
+    --primary-foreground: 255 255 255;
+  }
+
+  body {
+    @apply bg-white dark:bg-dark-background text-gray-900 dark:text-dark-text antialiased transition-colors duration-300;
   }
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  /* Text styles */
+  .text-gradient {
+    @apply bg-gradient-to-r from-gradient-purple-start to-gradient-pink-end text-transparent bg-clip-text;
+  }
+
+  .heading-primary {
+    @apply text-gray-900 dark:text-dark-text font-bold;
+  }
+
+  .text-body {
+    @apply text-gray-600 dark:text-dark-text-secondary;
+  }
+
+  /* Section styles */
+  .section-light {
+    @apply bg-white dark:bg-dark-background;
+  }
+
+  .section-gradient {
+    @apply bg-gradient-to-b from-white via-purple-50/50 to-white 
+           dark:from-dark-background dark:via-dark-background-secondary dark:to-dark-background
+           transition-colors duration-300;
+  }
+
+  /* Card styles */
+  .card-base {
+    @apply bg-white dark:bg-dark-card 
+           border border-gray-200/80 dark:border-dark-border
+           shadow-lg hover:shadow-xl
+           dark:shadow-dark-card/10 dark:hover:shadow-dark-card/20
+           rounded-2xl
+           transition-all duration-300
+           hover:border-purple-200 dark:hover:border-dark-border/80;
+  }
+
+  /* Input styles */
+  .input-base {
+    @apply w-full px-4 py-3 rounded-lg
+           bg-white dark:bg-dark-input
+           border border-gray-200 dark:border-dark-border
+           text-gray-900 dark:text-dark-text
+           placeholder-gray-400 dark:placeholder-gray-600
+           focus:border-purple-500 dark:focus:border-purple-400
+           focus:ring-2 focus:ring-purple-200/50 dark:focus:ring-purple-900/30
+           hover:border-gray-300 dark:hover:border-dark-border
+           transition-all duration-300;
+  }
+
+  /* Button styles */
+  .button-primary {
+    @apply bg-gradient-to-r from-gradient-purple-start to-gradient-pink-end
+           hover:from-gradient-purple-end hover:to-gradient-pink-start
+           text-white font-medium
+           px-6 py-3 rounded-full
+           transform hover:scale-105 active:scale-95
+           shadow-lg hover:shadow-xl
+           dark:shadow-purple-500/20 dark:hover:shadow-purple-500/30
+           transition-all duration-300;
+  }
+
+  /* Section description */
+  .section-description {
+    @apply text-gray-600 dark:text-dark-text-secondary
+           max-w-2xl mx-auto leading-relaxed;
+  }
+
+  /* Feature card icon */
+  .feature-icon-wrapper {
+    @apply w-12 h-12 
+           bg-purple-100 dark:bg-dark-card/50
+           rounded-xl flex items-center justify-center mb-4
+           transition-colors duration-300;
+  }
+
+  .feature-icon {
+    @apply w-6 h-6 text-purple-600 dark:text-purple-400
+           transition-colors duration-300;
+  }
 }
