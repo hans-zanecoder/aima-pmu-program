@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aima-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aima-web
+  template:
+    metadata:
+      labels:
+        app: aima-web
+    spec:
+      containers:
+      - name: aima-web
+        image: gcr.io/YOUR_PROJECT_ID/aima-web
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: SMTP_HOST
+          valueFrom:
+            secretKeyRef:
+              name: smtp-secrets
+              key: smtp-host
+        - name: SMTP_PORT
+          valueFrom:
+            secretKeyRef:
+              name: smtp-secrets
+              key: smtp-port
+        - name: SMTP_USER
+          valueFrom:
+            secretKeyRef:
+              name: smtp-secrets
+              key: smtp-user
+        - name: SMTP_PASS
+          valueFrom:
+            secretKeyRef:
+              name: smtp-secrets
+              key: smtp-pass
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
