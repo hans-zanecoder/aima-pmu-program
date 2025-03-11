@@ -1,0 +1,37 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches:
+      - main  
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Authenticate with Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+    - name: Set up gcloud CLI
+      uses: google-github-actions/setup-gcloud@v1
+
+    - name: Configure Docker authentication
+      run: gcloud auth configure-docker
+
+    - name: Build and push Docker image
+      run: |
+        gcloud builds submit --tag gcr.io/poc-1-aima-pmu/aima-web
+
+    - name: Deploy to Cloud Run
+      run: |
+        gcloud run deploy aima-web \
+          --image gcr.io/poc-1-aima-pmu/aima-web \
+          --region us-west1 \
+          --platform managed \
+          --allow-unauthenticated
