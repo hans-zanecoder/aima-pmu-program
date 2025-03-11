@@ -1,0 +1,38 @@
+steps:
+  # Step 1: Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/poc-1-aima-pmu/aima-web', '.']
+
+  # Step 2: Push the image to Google Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/poc-1-aima-pmu/aima-web']
+
+  # Step 3: Deploy container image to Google Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'aima-web'
+      - '--image'
+      - 'gcr.io/poc-1-aima-pmu/aima-web'
+      - '--region'
+      - 'us-west1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '8080'
+      - '--set-env-vars'
+      - 'NODE_ENV=production'
+      - '--set-secrets'
+      - 'SMTP_HOST=SMTP_HOST:latest'
+      - '--set-secrets'
+      - 'SMTP_PORT=SMTP_PORT:latest'
+      - '--set-secrets'
+      - 'SMTP_USER=SMTP_USER:latest'
+      - '--set-secrets'
+      - 'SMTP_PASS=SMTP_PASS:latest'
+
+images:
+  - 'gcr.io/poc-1-aima-pmu/aima-web'
