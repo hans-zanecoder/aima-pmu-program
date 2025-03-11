@@ -25,18 +25,21 @@ jobs:
         node-version: '20'
         cache: 'npm'
 
+    - name: Install dependencies
+      run: npm ci
+
     - name: Authenticate with Google Cloud
       uses: google-github-actions/auth@v1
       with:
         credentials_json: ${{ secrets.GCP_SA_KEY }}
+        project_id: ${{ env.PROJECT_ID }}
 
     - name: Set up Cloud SDK
       uses: google-github-actions/setup-gcloud@v1
-      with:
-        project_id: ${{ env.PROJECT_ID }}
 
     - name: Configure Docker authentication
-      run: gcloud auth configure-docker
+      run: |
+        gcloud auth configure-docker gcr.io
 
     - name: Build and push Docker image
       env:
