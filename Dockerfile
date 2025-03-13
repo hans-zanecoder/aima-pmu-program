@@ -51,4 +51,4 @@ USER nextjs
 EXPOSE 8080
 
 # Start the application
-CMD ["node", "wrongfile.js"]
+CMD ["node", "server.js"]
