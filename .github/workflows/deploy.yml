@@ -66,8 +66,8 @@ jobs:
 
         # Generate unique suffixes
         TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-        STABLE_SUFFIX="stable-${TIMESTAMP}"
-        CANDIDATE_SUFFIX="rc-${TIMESTAMP}"
+        STABLE_SUFFIX="BLUE-${TIMESTAMP}"
+        CANDIDATE_SUFFIX="GREEN-${TIMESTAMP}"
         
         # Label current revision as blue with unique name
         gcloud run services update ${{ env.SERVICE_NAME }} \
