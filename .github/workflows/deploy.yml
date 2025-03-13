@@ -136,14 +136,14 @@ jobs:
           exit 1
         fi
 
-    - name: Migrate traffic to Passive (now Active)
+    - name: Migrate traffic to new revision
       if: env.status == 'success'
       run: |
+        NEW_REVISION="${{ env.SERVICE_NAME }}-${{ env.REVISION_SUFFIX }}"
+        
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --to-revisions="${{ env.REVISION_SUFFIX }}=100"
-
-        echo "REVISION_SUFFIX=${{ env.REVISION_SUFFIX }}" >> $GITHUB_ENV
+          --to-revisions=$NEW_REVISION=100
 
     - name: Cleanup old revisions (keep last 5)
       if: always()
@@ -168,19 +168,16 @@ jobs:
     - name: Rollback on Failure
       if: failure()
       run: |
-        set -e
-        LAST_ACTIVE=$(gcloud run revisions list \
+        CURRENT_REVISION=$(gcloud run revisions list \
           --service=${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --filter="labels.deployment=active" \
+          --filter="traffic_percent>0" \
           --format="value(metadata.name)" \
           --limit=1)
 
-        if [ -n "$LAST_ACTIVE" ]; then
-          echo "Rolling back to last Active revision: $LAST_ACTIVE"
+        if [ -n "$CURRENT_REVISION" ]; then
+          echo "Rolling back to: $CURRENT_REVISION"
           gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
             --region=${{ env.REGION }} \
-            --to-revisions=$LAST_ACTIVE=100
-        else
-          echo "No previous Active revision found, rollback not possible."
+            --to-revisions=$CURRENT_REVISION=100
         fi
