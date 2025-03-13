@@ -58,8 +58,24 @@ jobs:
         docker build -t $IMAGE_NAME .
         docker push $IMAGE_NAME
 
-    - name: Deploy Green Revision
+    - name: Deploy New Revision
       run: |
+        # Get current serving revision
+        CURRENT_REVISION=$(gcloud run revisions list \
+          --service=${{ env.SERVICE_NAME }} \
+          --region=${{ env.REGION }} \
+          --filter="traffic_percent>0" \
+          --format="value(metadata.name)" \
+          --limit=1)
+
+        # Check current deployment state
+        CURRENT_STATE=$(gcloud run revisions describe $CURRENT_REVISION \
+          --region=${{ env.REGION }} \
+          --format="value(labels.state)" || echo "active")
+
+        # Determine new state (if current is active, deploy passive, and vice versa)
+        NEW_STATE=$([ "$CURRENT_STATE" = "active" ] && echo "passive" || echo "active")
+        
         gcloud run deploy ${{ env.SERVICE_NAME }} \
           --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TIMESTAMP }} \
           --region ${{ env.REGION }} \
@@ -70,12 +86,22 @@ jobs:
           --min-instances 1 \
           --memory 512Mi \
           --revision-suffix=${{ env.REVISION_SUFFIX }} \
-          --labels=deployment=green \
+          --labels=state=$NEW_STATE \
           --no-traffic \
           --timeout 300 \
           --execution-environment gen2 \
           --cpu=1 \
           --set-env-vars STARTUP_CPU_BOOST=true
+
+        # Ensure traffic stays with current revision during testing
+        if [ -n "$CURRENT_REVISION" ]; then
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --to-revisions=$CURRENT_REVISION=100
+        fi
+
+        echo "NEW_STATE=$NEW_STATE" >> $GITHUB_ENV
+        echo "CURRENT_REVISION=$CURRENT_REVISION" >> $GITHUB_ENV
 
     - name: Test Passive Revision
       id: test
