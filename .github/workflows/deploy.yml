@@ -35,8 +35,6 @@ jobs:
         credentials_json: ${{ secrets.GCP_SA_KEY }}
         service_account: ${{ env.SERVICE_ACCOUNT }}
         project_id: ${{ env.PROJECT_ID }}
-        create_credentials_file: true
-        export_environment_variables: true
 
     - name: Set up Cloud SDK
       uses: google-github-actions/setup-gcloud@v1
@@ -74,13 +72,9 @@ jobs:
           --port 8080 \
           --service-account ${{ env.SERVICE_ACCOUNT }} \
           --min-instances 1 \
-          --memory 1Gi \
-          --cpu 1 \
+          --memory 512Mi \
           --revision-suffix $CANDIDATE_SUFFIX \
           --labels=deployment=candidate,version=${{ env.TAG }} \
-          --timeout=300 \
-          --cpu-boost \
-          --set-env-vars=NODE_ENV=production,HOSTNAME=0.0.0.0 \
           --no-traffic
 
     # Test new revision
