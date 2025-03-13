@@ -45,9 +45,9 @@ jobs:
     - name: Generate version and revision suffix
       id: versioning
       run: |
-        TIMESTAMP=$(date +%Y%m%d%H%M%S)
-        ACTIVE_REVISION="${{ env.SERVICE_NAME }}-active-${TIMESTAMP}"
-        PASSIVE_REVISION="${{ env.SERVICE_NAME }}-passive-${TIMESTAMP}"
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        ACTIVE_REVISION="${{ env.SERVICE_NAME }}-rc-${TIMESTAMP}"
+        PASSIVE_REVISION="${{ env.SERVICE_NAME }}-rc-${TIMESTAMP}"
 
         echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
         echo "ACTIVE_REVISION=$ACTIVE_REVISION" >> $GITHUB_ENV
