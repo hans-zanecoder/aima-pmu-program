@@ -81,7 +81,7 @@ jobs:
           --set-secrets SMTP_PORT=SMTP_PORT:latest \
           --set-secrets SMTP_USER=SMTP_USER:latest \
           --set-secrets SMTP_PASS=SMTP_PASS:latest \
-          --labels=env=green,version=${{ env.TAG }}
+          --labels=env=green,version=${{ env.TAG }},deployment_type=green,status=pending
 
     # Test new revision
     - name: Test new revision
@@ -125,6 +125,17 @@ jobs:
     - name: Migrate traffic
       if: env.status == 'success'
       run: |
+        # Label current production as blue before switching traffic
+        gcloud run revisions list \
+          --service ${{ env.SERVICE_NAME }} \
+          --region ${{ env.REGION }} \
+          --filter="serving_state=ACTIVE AND traffic_percentage>0" \
+          --format="value(metadata.name)" | xargs -I {} \
+          gcloud run revisions update {} \
+          --region ${{ env.REGION }} \
+          --labels=env=blue,deployment_type=blue,status=active
+
+        # Then update traffic to new revision
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
           --to-latest
@@ -170,3 +181,16 @@ jobs:
         else
           echo "No previous revision found, rollback not possible."
         fi
+
+    # Update green revision status to active
+    - name: Update green revision status
+      if: env.status == 'success'
+      run: |
+        gcloud run revisions update $(gcloud run revisions list \
+          --service ${{ env.SERVICE_NAME }} \
+          --region ${{ env.REGION }} \
+          --sort-by=~metadata.creationTimestamp \
+          --limit=1 \
+          --format="value(metadata.name)") \
+          --region ${{ env.REGION }} \
+          --labels=env=green,deployment_type=green,status=active
