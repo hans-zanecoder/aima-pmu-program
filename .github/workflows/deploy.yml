@@ -42,42 +42,34 @@ jobs:
     - name: Configure Docker authentication
       run: gcloud auth configure-docker gcr.io
 
-    # Generate a unique tag for this deployment
-    - name: Generate version tag
-      id: tag
-      run: echo "TAG=$(date +%Y%m%d-%H%M%S)" >> $GITHUB_ENV
+    - name: Generate version and revision suffix
+      id: versioning
+      run: |
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        VERSION="1.2.3"  # Change this to auto-fetch from package.json or a release tag
 
-    # Build and push with unique tag
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+        echo "BLUE_REVISION=blue-v$VERSION-$TIMESTAMP" >> $GITHUB_ENV
+        echo "GREEN_REVISION=green-v$VERSION-$TIMESTAMP" >> $GITHUB_ENV
+
     - name: Build and push Docker image
       env:
-        IMAGE_NAME: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TAG }}
+        IMAGE_NAME: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.VERSION }}
       run: |
         docker build -t $IMAGE_NAME .
         docker push $IMAGE_NAME
 
-    # Deploy new revision
-    - name: Deploy new revision
-      id: deploy
+    - name: Label current revision as Blue
       run: |
-        # Get current active revision (Blue)
-        CURRENT_REVISION=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
-          --region=${{ env.REGION }} \
-          --format="value(status.traffic[0].revisionName)")
-
-        # Generate unique suffixes
-        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-        STABLE_SUFFIX="BLUE-${TIMESTAMP}"
-        CANDIDATE_SUFFIX="GREEN-${TIMESTAMP}"
-        
-        # Label current revision as blue with unique name
         gcloud run services update ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --revision-suffix $STABLE_SUFFIX \
-          --labels=deployment=stable,status=serving
+          --revision-suffix=${{ env.BLUE_REVISION }} \
+          --labels=deployment=blue,status=serving,version=${{ env.VERSION }}
 
-        # Deploy new revision (Green) with unique name
+    - name: Deploy new Green revision
+      run: |
         gcloud run deploy ${{ env.SERVICE_NAME }} \
-          --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TAG }} \
+          --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.VERSION }} \
           --region ${{ env.REGION }} \
           --platform managed \
           --allow-unauthenticated \
@@ -85,29 +77,24 @@ jobs:
           --service-account ${{ env.SERVICE_ACCOUNT }} \
           --min-instances 1 \
           --memory 512Mi \
-          --revision-suffix $CANDIDATE_SUFFIX \
-          --labels=deployment=candidate,version=${{ env.TAG }} \
+          --revision-suffix=${{ env.GREEN_REVISION }} \
+          --labels=deployment=green,version=${{ env.VERSION }} \
           --no-traffic \
           --timeout 300 \
           --execution-environment gen2 \
           --cpu=1 \
           --set-env-vars STARTUP_CPU_BOOST=true
 
-    # Test new revision
-    - name: Test new revision
+    - name: Test new Green revision
       id: test
       run: |
-        # Wait for the new revision to be ready
         sleep 30
-
-        # Get the latest revision URL
         NEW_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
           --format="value(status.url)")
 
         echo "Testing URL: $NEW_URL"
 
-        # Test with retry logic
         MAX_RETRIES=3
         RETRY_COUNT=0
         SUCCESS=false
@@ -131,47 +118,13 @@ jobs:
           exit 1
         fi
 
-    # Migrate traffic if tests pass
-    - name: Migrate traffic
+    - name: Migrate traffic to Green
       if: env.status == 'success'
       run: |
-        # Get the green revision
-        GREEN_REVISION=$(gcloud run revisions list \
-          --service=${{ env.SERVICE_NAME }} \
+        gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --filter="metadata.labels.deployment=candidate" \
-          --format="value(metadata.name)" \
-          --sort-by=~metadata.creationTimestamp \
-          --limit=1)
+          --to-revisions="${{ env.GREEN_REVISION }}=100"
 
-        if [ -n "$GREEN_REVISION" ]; then
-          echo "Migrating traffic to revision: $GREEN_REVISION"
-          # Update traffic to green revision
-          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
-            --region=${{ env.REGION }} \
-            --to-revisions="${GREEN_REVISION}=100"
-
-          # Get and update blue revision
-          BLUE_REVISION=$(gcloud run revisions list \
-            --service=${{ env.SERVICE_NAME }} \
-            --region=${{ env.REGION }} \
-            --filter="metadata.labels.deployment=stable" \
-            --format="value(metadata.name)" \
-            --sort-by=~metadata.creationTimestamp \
-            --limit=1)
-
-          if [ -n "$BLUE_REVISION" ]; then
-            echo "Removing traffic from blue revision: $BLUE_REVISION"
-            gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
-              --region=${{ env.REGION }} \
-              --to-revisions="${GREEN_REVISION}=100,${BLUE_REVISION}=0"
-          fi
-        else
-          echo "No green revision found, traffic migration failed"
-          exit 1
-        fi
-
-    # Clean up failed revisions
     - name: Clean up failed revisions
       if: always()
       run: |
@@ -184,18 +137,12 @@ jobs:
 
         for REVISION in $FAILED_REVISIONS; do
           echo "Cleaning up failed revision: $REVISION"
-          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
-            --region=${{ env.REGION }} \
-            --remove-tags=$REVISION \
-            --quiet || true
-          
           gcloud run revisions delete $REVISION \
             --region=${{ env.REGION }} \
             --quiet || true
         done
 
-    # Cleanup old revisions (keep last 5)
-    - name: Cleanup old revisions
+    - name: Cleanup old revisions (keep last 5)
       if: always()
       run: |
         set -e
@@ -215,24 +162,22 @@ jobs:
           fi
         done
 
-    # Rollback on failure
     - name: Rollback on failure
       if: failure()
       run: |
         set -e
-        # Get the current active revision (Blue)
         BLUE_REVISION=$(gcloud run revisions list \
           --service=${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --filter="labels.deployment=stable AND labels.status=active" \
+          --filter="labels.deployment=blue" \
           --format="value(metadata.name)" \
           --limit=1)
 
         if [ -n "$BLUE_REVISION" ]; then
-          echo "Rolling back to revision: $BLUE_REVISION"
+          echo "Rolling back to Blue: $BLUE_REVISION"
           gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
             --region=${{ env.REGION }} \
             --to-revisions=$BLUE_REVISION=100
         else
-          echo "No blue revision found, rollback not possible."
+          echo "No Blue revision found, rollback not possible."
         fi
