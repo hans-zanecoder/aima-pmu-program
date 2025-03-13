@@ -229,8 +229,8 @@ type Translations = {
 const translations: Translations = {
   en: {
     hero: {
-      title: "Transform Your Career",
-      subtitle: "Investigating the Error in Login Page",
+      title: "Transform Your Lowell",
+      subtitle: "in Permanent Makeup",
       description: "Join over 3,000 successful graduates who have transformed their careers through our industry-leading permanent makeup training programs.",
       enrollButton: "Enroll Now",
       tourButton: "Schedule Campus Tour",
