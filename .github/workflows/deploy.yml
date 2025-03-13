@@ -59,11 +59,23 @@ jobs:
     - name: Deploy new revision
       id: deploy
       run: |
-        # Generate unique suffix for new revision
+        # Get current active revision (Blue)
+        CURRENT_REVISION=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+          --region=${{ env.REGION }} \
+          --format="value(status.traffic[0].revisionName)")
+
+        # Generate unique suffixes
         TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        STABLE_SUFFIX="stable-${TIMESTAMP}"
         CANDIDATE_SUFFIX="rc-${TIMESTAMP}"
         
-        # Deploy new revision (candidate) with unique name
+        # Label current revision as blue with unique name
+        gcloud run services update ${{ env.SERVICE_NAME }} \
+          --region=${{ env.REGION }} \
+          --revision-suffix $STABLE_SUFFIX \
+          --labels=deployment=stable,status=serving
+
+        # Deploy new revision (Green) with unique name
         gcloud run deploy ${{ env.SERVICE_NAME }} \
           --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TAG }} \
           --region ${{ env.REGION }} \
@@ -75,7 +87,11 @@ jobs:
           --memory 512Mi \
           --revision-suffix $CANDIDATE_SUFFIX \
           --labels=deployment=candidate,version=${{ env.TAG }} \
-          --no-traffic
+          --no-traffic \
+          --timeout 300 \
+          --startup-probe-initial-delay 30 \
+          --startup-probe-period 10 \
+          --startup-probe-failure-threshold 3
 
     # Test new revision
     - name: Test new revision
@@ -119,8 +135,8 @@ jobs:
     - name: Migrate traffic
       if: env.status == 'success'
       run: |
-        # Get the candidate revision
-        CANDIDATE_REVISION=$(gcloud run revisions list \
+        # Get the green revision
+        GREEN_REVISION=$(gcloud run revisions list \
           --service=${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
           --filter="metadata.labels.deployment=candidate" \
@@ -128,16 +144,55 @@ jobs:
           --sort-by=~metadata.creationTimestamp \
           --limit=1)
 
-        if [ -n "$CANDIDATE_REVISION" ]; then
-          echo "Migrating traffic to revision: $CANDIDATE_REVISION"
-          # Update traffic to candidate revision
+        if [ -n "$GREEN_REVISION" ]; then
+          echo "Migrating traffic to revision: $GREEN_REVISION"
+          # Update traffic to green revision
           gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
             --region=${{ env.REGION }} \
-            --to-revisions="${CANDIDATE_REVISION}=100"
+            --to-revisions="${GREEN_REVISION}=100"
+
+          # Get and update blue revision
+          BLUE_REVISION=$(gcloud run revisions list \
+            --service=${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --filter="metadata.labels.deployment=stable" \
+            --format="value(metadata.name)" \
+            --sort-by=~metadata.creationTimestamp \
+            --limit=1)
+
+          if [ -n "$BLUE_REVISION" ]; then
+            echo "Removing traffic from blue revision: $BLUE_REVISION"
+            gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+              --region=${{ env.REGION }} \
+              --to-revisions="${GREEN_REVISION}=100,${BLUE_REVISION}=0"
+          fi
         else
-          echo "No candidate revision found, traffic migration failed"
+          echo "No green revision found, traffic migration failed"
           exit 1
         fi
+
+    # Clean up failed revisions
+    - name: Clean up failed revisions
+      if: always()
+      run: |
+        set -e
+        FAILED_REVISIONS=$(gcloud run revisions list \
+          --service ${{ env.SERVICE_NAME }} \
+          --region=${{ env.REGION }} \
+          --filter="status.conditions.type='Ready' AND status.conditions.status='False'" \
+          --format='value(metadata.name)')
+
+        for REVISION in $FAILED_REVISIONS; do
+          echo "Cleaning up failed revision: $REVISION"
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --remove-tags=$REVISION \
+            --quiet || true
+          
+          gcloud run revisions delete $REVISION \
+            --region=${{ env.REGION }} \
+            --quiet || true
+        done
 
     # Cleanup old revisions (keep last 5)
     - name: Cleanup old revisions
@@ -165,18 +220,19 @@ jobs:
       if: failure()
       run: |
         set -e
-        # Get the current serving revision
-        CURRENT_REVISION=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+        # Get the current active revision (Blue)
+        BLUE_REVISION=$(gcloud run revisions list \
+          --service=${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --format="value(status.traffic[0].revisionName)")
+          --filter="labels.deployment=stable AND labels.status=active" \
+          --format="value(metadata.name)" \
+          --limit=1)
 
-        # Label it as stable only when we need to rollback
-        gcloud run services update ${{ env.SERVICE_NAME }} \
-          --region=${{ env.REGION }} \
-          --revision-suffix stable-$(date +%Y%m%d-%H%M%S) \
-          --labels=deployment=stable,status=serving
-
-        # Update traffic to this stable revision
-        gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
-          --region=${{ env.REGION }} \
-          --to-revisions=$CURRENT_REVISION=100
+        if [ -n "$BLUE_REVISION" ]; then
+          echo "Rolling back to revision: $BLUE_REVISION"
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --to-revisions=$BLUE_REVISION=100
+        else
+          echo "No blue revision found, rollback not possible."
+        fi
