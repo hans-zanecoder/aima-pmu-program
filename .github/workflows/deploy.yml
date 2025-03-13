@@ -89,9 +89,9 @@ jobs:
           --labels=deployment=candidate,version=${{ env.TAG }} \
           --no-traffic \
           --timeout 300 \
-          --startup-probe-initial-delay 30 \
-          --startup-probe-period 10 \
-          --startup-probe-failure-threshold 3
+          --execution-environment gen2 \
+          --cpu=1 \
+          --set-env-vars STARTUP_CPU_BOOST=true
 
     # Test new revision
     - name: Test new revision
