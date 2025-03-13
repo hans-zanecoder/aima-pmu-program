@@ -59,14 +59,18 @@ jobs:
     - name: Deploy new revision
       id: deploy
       run: |
-        # First, verify secret access
-        for SECRET in SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASS; do
-          gcloud secrets versions access latest --secret=$SECRET --project=${{ env.PROJECT_ID }} > /dev/null || {
-            echo "Error: Cannot access secret $SECRET"
-            exit 1
-          }
-        done
+        # Get current active revision (Blue)
+        CURRENT_REVISION=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+          --region=${{ env.REGION }} \
+          --format="value(status.traffic[0].revisionName)")
 
+        # Label it as blue
+        gcloud run services update ${{ env.SERVICE_NAME }} \
+          --region=${{ env.REGION }} \
+          --revision-suffix=blue \
+          --labels=env=blue,deployment_type=blue,status=active
+
+        # Deploy new revision (Green)
         gcloud run deploy ${{ env.SERVICE_NAME }} \
           --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TAG }} \
           --region ${{ env.REGION }} \
@@ -81,7 +85,9 @@ jobs:
           --set-secrets SMTP_PORT=SMTP_PORT:latest \
           --set-secrets SMTP_USER=SMTP_USER:latest \
           --set-secrets SMTP_PASS=SMTP_PASS:latest \
-          --labels=env=green,version=${{ env.TAG }},deployment_type=green,status=pending
+          --revision-suffix=green \
+          --labels=env=green,version=${{ env.TAG }},deployment_type=green,status=pending \
+          --no-traffic
 
     # Test new revision
     - name: Test new revision
