@@ -64,16 +64,13 @@ jobs:
           --region=${{ env.REGION }} \
           --format="value(status.traffic[0].revisionName)")
 
-        # Generate unique suffix for blue revision
-        BLUE_SUFFIX="blue-$(date +%Y%m%d-%H%M%S)"
-        
-        # Label current revision as blue with unique name
+        # Label current revision as blue
         gcloud run services update ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --revision-suffix $BLUE_SUFFIX \
-          --labels=deployment=blue,status=active
+          --revision-suffix blue \
+          --labels=deployment=blue,status=serving
 
-        # Deploy new revision (Green) with unique name
+        # Deploy new revision (Green)
         gcloud run deploy ${{ env.SERVICE_NAME }} \
           --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TAG }} \
           --region ${{ env.REGION }} \
@@ -83,7 +80,7 @@ jobs:
           --service-account ${{ env.SERVICE_ACCOUNT }} \
           --min-instances 1 \
           --memory 512Mi \
-          --revision-suffix green-${{ env.TAG }} \
+          --revision-suffix green \
           --labels=deployment=green,version=${{ env.TAG }} \
           --no-traffic
 
@@ -129,20 +126,32 @@ jobs:
     - name: Migrate traffic
       if: env.status == 'success'
       run: |
-        # Label current production as blue before switching traffic
-        gcloud run revisions list \
-          --service ${{ env.SERVICE_NAME }} \
-          --region ${{ env.REGION }} \
-          --filter="serving_state=ACTIVE AND traffic_percentage>0" \
-          --format="value(metadata.name)" | xargs -I {} \
-          gcloud run revisions update {} \
-          --region ${{ env.REGION }} \
-          --labels=env=blue,deployment_type=blue,status=active
+        # Get the green revision
+        GREEN_REVISION=$(gcloud run revisions list \
+          --service=${{ env.SERVICE_NAME }} \
+          --region=${{ env.REGION }} \
+          --filter="labels.deployment=green" \
+          --format="value(metadata.name)" \
+          --limit=1)
 
-        # Then update traffic to new revision
+        # Update traffic to green revision
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --to-latest
+          --to-revisions=$GREEN_REVISION=100
+
+        # Remove traffic from blue revision
+        BLUE_REVISION=$(gcloud run revisions list \
+          --service=${{ env.SERVICE_NAME }} \
+          --region=${{ env.REGION }} \
+          --filter="labels.deployment=blue" \
+          --format="value(metadata.name)" \
+          --limit=1)
+
+        if [ -n "$BLUE_REVISION" ]; then
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --to-revisions=$BLUE_REVISION=0
+        fi
 
     # Cleanup old revisions (keep last 5)
     - name: Cleanup old revisions
