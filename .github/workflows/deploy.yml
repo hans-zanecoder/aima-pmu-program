@@ -75,6 +75,8 @@ jobs:
           --memory 512Mi \
           --revision-suffix $CANDIDATE_SUFFIX \
           --labels=deployment=candidate,version=${{ env.TAG }} \
+          --timeout=300 \
+          --startup-cpu-boost \
           --no-traffic
 
     # Test new revision
