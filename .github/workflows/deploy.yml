@@ -15,7 +15,7 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
@@ -46,11 +46,13 @@ jobs:
       id: versioning
       run: |
         TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-        VERSION="1.2.3"  # Change this to auto-fetch from package.json or a release tag
+        VERSION=$(jq -r .version package.json) # Fetch version from package.json
+        ACTIVE_REVISION="aima-active-$TIMESTAMP"
+        PASSIVE_REVISION="aima-passive-$TIMESTAMP"
 
         echo "VERSION=$VERSION" >> $GITHUB_ENV
-        echo "BLUE_REVISION=blue-v$VERSION-$TIMESTAMP" >> $GITHUB_ENV
-        echo "GREEN_REVISION=green-v$VERSION-$TIMESTAMP" >> $GITHUB_ENV
+        echo "ACTIVE_REVISION=$ACTIVE_REVISION" >> $GITHUB_ENV
+        echo "PASSIVE_REVISION=$PASSIVE_REVISION" >> $GITHUB_ENV
 
     - name: Build and push Docker image
       env:
@@ -59,14 +61,7 @@ jobs:
         docker build -t $IMAGE_NAME .
         docker push $IMAGE_NAME
 
-    - name: Label current revision as Blue
-      run: |
-        gcloud run services update ${{ env.SERVICE_NAME }} \
-          --region=${{ env.REGION }} \
-          --revision-suffix=${{ env.BLUE_REVISION }} \
-          --labels=deployment=blue,status=serving,version=${{ env.VERSION }}
-
-    - name: Deploy new Green revision
+    - name: Deploy Passive Revision
       run: |
         gcloud run deploy ${{ env.SERVICE_NAME }} \
           --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.VERSION }} \
@@ -77,15 +72,15 @@ jobs:
           --service-account ${{ env.SERVICE_ACCOUNT }} \
           --min-instances 1 \
           --memory 512Mi \
-          --revision-suffix=${{ env.GREEN_REVISION }} \
-          --labels=deployment=green,version=${{ env.VERSION }} \
+          --revision-suffix=${{ env.PASSIVE_REVISION }} \
+          --labels=deployment=passive,version=${{ env.VERSION }} \
           --no-traffic \
           --timeout 300 \
           --execution-environment gen2 \
           --cpu=1 \
           --set-env-vars STARTUP_CPU_BOOST=true
 
-    - name: Test new Green revision
+    - name: Test Passive Revision
       id: test
       run: |
         sleep 30
@@ -101,7 +96,7 @@ jobs:
 
         while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$NEW_URL")
-          
+
           if [ "$HTTP_STATUS" -eq 200 ]; then
             SUCCESS=true
             echo "status=success" >> $GITHUB_ENV
@@ -118,29 +113,14 @@ jobs:
           exit 1
         fi
 
-    - name: Migrate traffic to Green
+    - name: Migrate traffic to Passive (now Active)
       if: env.status == 'success'
       run: |
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --to-revisions="${{ env.GREEN_REVISION }}=100"
+          --to-revisions="${{ env.PASSIVE_REVISION }}=100"
 
-    - name: Clean up failed revisions
-      if: always()
-      run: |
-        set -e
-        FAILED_REVISIONS=$(gcloud run revisions list \
-          --service ${{ env.SERVICE_NAME }} \
-          --region=${{ env.REGION }} \
-          --filter="status.conditions.type='Ready' AND status.conditions.status='False'" \
-          --format='value(metadata.name)')
-
-        for REVISION in $FAILED_REVISIONS; do
-          echo "Cleaning up failed revision: $REVISION"
-          gcloud run revisions delete $REVISION \
-            --region=${{ env.REGION }} \
-            --quiet || true
-        done
+        echo "ACTIVE_REVISION=${{ env.PASSIVE_REVISION }}" >> $GITHUB_ENV
 
     - name: Cleanup old revisions (keep last 5)
       if: always()
@@ -162,22 +142,22 @@ jobs:
           fi
         done
 
-    - name: Rollback on failure
+    - name: Rollback on Failure
       if: failure()
       run: |
         set -e
-        BLUE_REVISION=$(gcloud run revisions list \
+        LAST_ACTIVE=$(gcloud run revisions list \
           --service=${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --filter="labels.deployment=blue" \
+          --filter="labels.deployment=active" \
           --format="value(metadata.name)" \
           --limit=1)
 
-        if [ -n "$BLUE_REVISION" ]; then
-          echo "Rolling back to Blue: $BLUE_REVISION"
+        if [ -n "$LAST_ACTIVE" ]; then
+          echo "Rolling back to last Active revision: $LAST_ACTIVE"
           gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
             --region=${{ env.REGION }} \
-            --to-revisions=$BLUE_REVISION=100
+            --to-revisions=$LAST_ACTIVE=100
         else
-          echo "No Blue revision found, rollback not possible."
+          echo "No previous Active revision found, rollback not possible."
         fi
