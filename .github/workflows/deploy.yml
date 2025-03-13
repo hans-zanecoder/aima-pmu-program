@@ -59,6 +59,14 @@ jobs:
     - name: Deploy new revision
       id: deploy
       run: |
+        # First, verify secret access
+        for SECRET in SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASS; do
+          gcloud secrets versions access latest --secret=$SECRET --project=${{ env.PROJECT_ID }} > /dev/null || {
+            echo "Error: Cannot access secret $SECRET"
+            exit 1
+          }
+        done
+
         gcloud run deploy ${{ env.SERVICE_NAME }} \
           --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TAG }} \
           --region ${{ env.REGION }} \
