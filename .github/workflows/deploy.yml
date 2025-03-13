@@ -45,18 +45,17 @@ jobs:
     - name: Generate version and revision suffix
       id: versioning
       run: |
-        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-        VERSION=$(jq -r .version package.json) # Fetch version from package.json
-        ACTIVE_REVISION="aima-active-$TIMESTAMP"
-        PASSIVE_REVISION="aima-passive-$TIMESTAMP"
+        TIMESTAMP=$(date +%Y%m%d%H%M%S)
+        ACTIVE_REVISION="aima-active-${TIMESTAMP}"
+        PASSIVE_REVISION="aima-passive-${TIMESTAMP}"
 
-        echo "VERSION=$VERSION" >> $GITHUB_ENV
+        echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
         echo "ACTIVE_REVISION=$ACTIVE_REVISION" >> $GITHUB_ENV
         echo "PASSIVE_REVISION=$PASSIVE_REVISION" >> $GITHUB_ENV
 
     - name: Build and push Docker image
       env:
-        IMAGE_NAME: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.VERSION }}
+        IMAGE_NAME: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TIMESTAMP }}
       run: |
         docker build -t $IMAGE_NAME .
         docker push $IMAGE_NAME
@@ -64,7 +63,7 @@ jobs:
     - name: Deploy Passive Revision
       run: |
         gcloud run deploy ${{ env.SERVICE_NAME }} \
-          --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.VERSION }} \
+          --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TIMESTAMP }} \
           --region ${{ env.REGION }} \
           --platform managed \
           --allow-unauthenticated \
@@ -73,7 +72,7 @@ jobs:
           --min-instances 1 \
           --memory 512Mi \
           --revision-suffix=${{ env.PASSIVE_REVISION }} \
-          --labels=deployment=passive,version=${{ env.VERSION }} \
+          --labels=deployment=passive \
           --no-traffic \
           --timeout 300 \
           --execution-environment gen2 \
