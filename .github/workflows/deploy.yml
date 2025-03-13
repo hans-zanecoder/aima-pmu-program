@@ -46,12 +46,10 @@ jobs:
       id: versioning
       run: |
         TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-        BLUE_REVISION="${{ env.SERVICE_NAME }}-blue-${TIMESTAMP}"
-        GREEN_REVISION="${{ env.SERVICE_NAME }}-green-${TIMESTAMP}"
-
+        REVISION_SUFFIX="rc-${TIMESTAMP}"
+        
         echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
-        echo "BLUE_REVISION=$BLUE_REVISION" >> $GITHUB_ENV
-        echo "GREEN_REVISION=$GREEN_REVISION" >> $GITHUB_ENV
+        echo "REVISION_SUFFIX=$REVISION_SUFFIX" >> $GITHUB_ENV
 
     - name: Build and push Docker image
       env:
@@ -71,7 +69,7 @@ jobs:
           --service-account ${{ env.SERVICE_ACCOUNT }} \
           --min-instances 1 \
           --memory 512Mi \
-          --revision-suffix=${{ env.GREEN_REVISION }} \
+          --revision-suffix=${{ env.REVISION_SUFFIX }} \
           --labels=deployment=green \
           --no-traffic \
           --timeout 300 \
@@ -117,9 +115,9 @@ jobs:
       run: |
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --to-revisions="${{ env.GREEN_REVISION }}=100"
+          --to-revisions="${{ env.REVISION_SUFFIX }}=100"
 
-        echo "GREEN_REVISION=${{ env.GREEN_REVISION }}" >> $GITHUB_ENV
+        echo "REVISION_SUFFIX=${{ env.REVISION_SUFFIX }}" >> $GITHUB_ENV
 
     - name: Cleanup old revisions (keep last 5)
       if: always()
