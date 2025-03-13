@@ -46,12 +46,12 @@ jobs:
       id: versioning
       run: |
         TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-        ACTIVE_REVISION="${{ env.SERVICE_NAME }}-rc-${TIMESTAMP}"
-        PASSIVE_REVISION="${{ env.SERVICE_NAME }}-rc-${TIMESTAMP}"
+        BLUE_REVISION="${{ env.SERVICE_NAME }}-blue-${TIMESTAMP}"
+        GREEN_REVISION="${{ env.SERVICE_NAME }}-green-${TIMESTAMP}"
 
         echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
-        echo "ACTIVE_REVISION=$ACTIVE_REVISION" >> $GITHUB_ENV
-        echo "PASSIVE_REVISION=$PASSIVE_REVISION" >> $GITHUB_ENV
+        echo "BLUE_REVISION=$BLUE_REVISION" >> $GITHUB_ENV
+        echo "GREEN_REVISION=$GREEN_REVISION" >> $GITHUB_ENV
 
     - name: Build and push Docker image
       env:
@@ -60,7 +60,7 @@ jobs:
         docker build -t $IMAGE_NAME .
         docker push $IMAGE_NAME
 
-    - name: Deploy Passive Revision
+    - name: Deploy Green Revision
       run: |
         gcloud run deploy ${{ env.SERVICE_NAME }} \
           --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TIMESTAMP }} \
@@ -71,8 +71,8 @@ jobs:
           --service-account ${{ env.SERVICE_ACCOUNT }} \
           --min-instances 1 \
           --memory 512Mi \
-          --revision-suffix=${{ env.PASSIVE_REVISION }} \
-          --labels=deployment=passive \
+          --revision-suffix=${{ env.GREEN_REVISION }} \
+          --labels=deployment=green \
           --no-traffic \
           --timeout 300 \
           --execution-environment gen2 \
@@ -117,9 +117,9 @@ jobs:
       run: |
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --to-revisions="${{ env.PASSIVE_REVISION }}=100"
+          --to-revisions="${{ env.GREEN_REVISION }}=100"
 
-        echo "ACTIVE_REVISION=${{ env.PASSIVE_REVISION }}" >> $GITHUB_ENV
+        echo "GREEN_REVISION=${{ env.GREEN_REVISION }}" >> $GITHUB_ENV
 
     - name: Cleanup old revisions (keep last 5)
       if: always()
