@@ -72,11 +72,13 @@ jobs:
           --port 8080 \
           --service-account ${{ env.SERVICE_ACCOUNT }} \
           --min-instances 1 \
-          --memory 512Mi \
+          --memory 1Gi \
+          --cpu 1 \
           --revision-suffix $CANDIDATE_SUFFIX \
           --labels=deployment=candidate,version=${{ env.TAG }} \
           --timeout=300 \
           --cpu-boost \
+          --set-env-vars=NODE_ENV=production,HOSTNAME=0.0.0.0 \
           --no-traffic
 
     # Test new revision

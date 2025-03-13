@@ -23,7 +23,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
 # Build application
-RUN npm run build
+RUN npm run build && \
+    cp -r public .next/standalone/ && \
+    cp -r .next/static .next/standalone/.next/
 
 # Runner stage
 FROM base AS runner
@@ -33,14 +35,13 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=8080
-ENV HOSTNAME=0.0.0.0
+ENV HOSTNAME="0.0.0.0"
 
 # Add non-root user
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-# Copy necessary files and set permissions
-COPY --from=builder /app/public ./public
+# Copy standalone build and set permissions
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
@@ -50,5 +51,5 @@ USER nextjs
 # Expose port
 EXPOSE 8080
 
-# Start the application
+# Start the application with explicit host binding
 CMD ["node", "server.js"]
