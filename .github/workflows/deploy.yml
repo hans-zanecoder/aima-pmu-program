@@ -10,6 +10,7 @@ env:
   PROJECT_ID: poc-1-aima-pmu
   SERVICE_NAME: aima-web
   REGION: us-west1
+  SERVICE_ACCOUNT: github-actions@poc-1-aima-pmu.iam.gserviceaccount.com
 
 jobs:
   deploy:
@@ -32,6 +33,7 @@ jobs:
       uses: google-github-actions/auth@v1
       with:
         credentials_json: ${{ secrets.GCP_SA_KEY }}
+        service_account: ${{ env.SERVICE_ACCOUNT }}
         project_id: ${{ env.PROJECT_ID }}
 
     - name: Set up Cloud SDK
@@ -47,8 +49,9 @@ jobs:
 
     # Build and push with unique tag
     - name: Build and push Docker image
+      env:
+        IMAGE_NAME: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TAG }}
       run: |
-        IMAGE_NAME=gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TAG }}
         docker build -t $IMAGE_NAME .
         docker push $IMAGE_NAME
 
@@ -62,7 +65,7 @@ jobs:
           --platform managed \
           --allow-unauthenticated \
           --port 8080 \
-          --no-traffic \
+          --service-account ${{ env.SERVICE_ACCOUNT }} \
           --min-instances 1 \
           --memory 512Mi \
           --set-env-vars NODE_ENV=production \
@@ -76,22 +79,36 @@ jobs:
     - name: Test new revision
       id: test
       run: |
-        # Fetch latest revision URL
-        NEW_REVISION=$(gcloud run revisions list \
-          --service=${{ env.SERVICE_NAME }} --region=${{ env.REGION }} \
-          --format="value(metadata.name)" --sort-by="~metadata.creationTimestamp" --limit=1)
+        # Wait for the new revision to be ready
+        sleep 30
 
-        NEW_URL=$(gcloud run revisions describe $NEW_REVISION \
-          --region=${{ env.REGION }} --format="value(status.url)")
+        # Get the latest revision URL
+        NEW_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+          --region=${{ env.REGION }} \
+          --format="value(status.url)")
 
-        echo "New revision URL: $NEW_URL"
+        echo "Testing URL: $NEW_URL"
 
-        # Perform health check
-        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" $NEW_URL)
+        # Test with retry logic
+        MAX_RETRIES=3
+        RETRY_COUNT=0
+        SUCCESS=false
 
-        if [ "$HTTP_STATUS" -eq 200 ]; then
-          echo "status=success" >> $GITHUB_ENV
-        else
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$NEW_URL")
+          
+          if [ "$HTTP_STATUS" -eq 200 ]; then
+            SUCCESS=true
+            echo "status=success" >> $GITHUB_ENV
+            break
+          else
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo "Attempt $RETRY_COUNT failed with status $HTTP_STATUS"
+            [ $RETRY_COUNT -lt $MAX_RETRIES ] && sleep 10
+          fi
+        done
+
+        if [ "$SUCCESS" = false ]; then
           echo "status=failure" >> $GITHUB_ENV
           exit 1
         fi
