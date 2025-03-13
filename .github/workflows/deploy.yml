@@ -55,7 +55,7 @@ jobs:
         docker build -t $IMAGE_NAME .
         docker push $IMAGE_NAME
 
-    # Deploy new revision (Green) without traffic
+    # Deploy new revision (Green)
     - name: Deploy new revision
       id: deploy
       run: |
@@ -67,8 +67,8 @@ jobs:
         # Label it as blue
         gcloud run services update ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --revision-suffix=blue \
-          --labels=env=blue,deployment_type=blue,status=active
+          --revision-suffix blue \
+          --labels=deployment=blue
 
         # Deploy new revision (Green)
         gcloud run deploy ${{ env.SERVICE_NAME }} \
@@ -80,13 +80,8 @@ jobs:
           --service-account ${{ env.SERVICE_ACCOUNT }} \
           --min-instances 1 \
           --memory 512Mi \
-          --set-env-vars NODE_ENV=production \
-          --set-secrets SMTP_HOST=SMTP_HOST:latest \
-          --set-secrets SMTP_PORT=SMTP_PORT:latest \
-          --set-secrets SMTP_USER=SMTP_USER:latest \
-          --set-secrets SMTP_PASS=SMTP_PASS:latest \
-          --revision-suffix=green \
-          --labels=env=green,version=${{ env.TAG }},deployment_type=green,status=pending \
+          --revision-suffix green-${{ env.TAG }} \
+          --labels=deployment=green,version=${{ env.TAG }} \
           --no-traffic
 
     # Test new revision
