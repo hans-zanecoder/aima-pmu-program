@@ -135,27 +135,36 @@ jobs:
         GREEN_REVISION=$(gcloud run revisions list \
           --service=${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --filter="labels.deployment=green" \
+          --filter="metadata.labels.deployment=green" \
           --format="value(metadata.name)" \
+          --sort-by=~metadata.creationTimestamp \
           --limit=1)
 
-        # Update traffic to green revision
-        gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
-          --region=${{ env.REGION }} \
-          --to-revisions=$GREEN_REVISION=100
-
-        # Remove traffic from blue revision
-        BLUE_REVISION=$(gcloud run revisions list \
-          --service=${{ env.SERVICE_NAME }} \
-          --region=${{ env.REGION }} \
-          --filter="labels.deployment=blue" \
-          --format="value(metadata.name)" \
-          --limit=1)
-
-        if [ -n "$BLUE_REVISION" ]; then
+        if [ -n "$GREEN_REVISION" ]; then
+          echo "Migrating traffic to revision: $GREEN_REVISION"
+          # Update traffic to green revision
           gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
             --region=${{ env.REGION }} \
-            --to-revisions=$BLUE_REVISION=0
+            --to-revisions="${GREEN_REVISION}=100"
+
+          # Get and update blue revision
+          BLUE_REVISION=$(gcloud run revisions list \
+            --service=${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --filter="metadata.labels.deployment=blue" \
+            --format="value(metadata.name)" \
+            --sort-by=~metadata.creationTimestamp \
+            --limit=1)
+
+          if [ -n "$BLUE_REVISION" ]; then
+            echo "Removing traffic from blue revision: $BLUE_REVISION"
+            gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+              --region=${{ env.REGION }} \
+              --to-revisions="${GREEN_REVISION}=100,${BLUE_REVISION}=0"
+          fi
+        else
+          echo "No green revision found, traffic migration failed"
+          exit 1
         fi
 
     # Cleanup old revisions (keep last 5)
