@@ -46,8 +46,8 @@ jobs:
       id: versioning
       run: |
         TIMESTAMP=$(date +%Y%m%d%H%M%S)
-        ACTIVE_REVISION="aima-active-${TIMESTAMP}"
-        PASSIVE_REVISION="aima-passive-${TIMESTAMP}"
+        ACTIVE_REVISION="${{ env.SERVICE_NAME }}-active-${TIMESTAMP}"
+        PASSIVE_REVISION="${{ env.SERVICE_NAME }}-passive-${TIMESTAMP}"
 
         echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
         echo "ACTIVE_REVISION=$ACTIVE_REVISION" >> $GITHUB_ENV
