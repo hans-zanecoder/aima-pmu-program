@@ -64,13 +64,18 @@ jobs:
           --region=${{ env.REGION }} \
           --format="value(status.traffic[0].revisionName)")
 
-        # Label current revision as blue
+        # Generate unique suffixes
+        TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+        BLUE_SUFFIX="blue-${TIMESTAMP}"
+        GREEN_SUFFIX="green-${TIMESTAMP}"
+        
+        # Label current revision as blue with unique name
         gcloud run services update ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --revision-suffix blue \
+          --revision-suffix $BLUE_SUFFIX \
           --labels=deployment=blue,status=serving
 
-        # Deploy new revision (Green)
+        # Deploy new revision (Green) with unique name
         gcloud run deploy ${{ env.SERVICE_NAME }} \
           --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TAG }} \
           --region ${{ env.REGION }} \
@@ -80,7 +85,7 @@ jobs:
           --service-account ${{ env.SERVICE_ACCOUNT }} \
           --min-instances 1 \
           --memory 512Mi \
-          --revision-suffix green \
+          --revision-suffix $GREEN_SUFFIX \
           --labels=deployment=green,version=${{ env.TAG }} \
           --no-traffic
 
