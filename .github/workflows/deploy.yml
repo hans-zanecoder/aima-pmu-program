@@ -151,7 +151,7 @@ jobs:
         echo "Shifting 10% traffic to new revision..."
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --to-revisions=$CURRENT_REVISION=90,$NEW_REVISION=10
+          --to-revisions="${CURRENT_REVISION}=90,${NEW_REVISION}=10"
 
         echo "Waiting for 2 minutes before increasing traffic..."
         sleep 120
@@ -159,7 +159,7 @@ jobs:
         echo "Increasing traffic to 50%..."
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --to-revisions=$CURRENT_REVISION=50,$NEW_REVISION=50
+          --to-revisions="${CURRENT_REVISION}=50,${NEW_REVISION}=50"
 
         echo "Waiting for 3 minutes before full rollout..."
         sleep 180
@@ -167,7 +167,7 @@ jobs:
         echo "Moving 100% traffic to new revision..."
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --to-revisions=$NEW_REVISION=100
+          --to-revisions="${NEW_REVISION}=100"
 
     - name: Cleanup old revisions (keep last 5)
       if: always()
@@ -209,7 +209,13 @@ jobs:
     - name: Notify Deployment Status
       if: always()
       run: |
+        NEW_REVISION="${{ env.SERVICE_NAME }}-${{ env.REVISION_SUFFIX }}"
+        STATUS_EMOJI="✅"
+        if [ "${{ job.status }}" != "success" ]; then
+          STATUS_EMOJI="❌"
+        fi
+        
         curl -X POST -H "Content-Type: application/json" \
-        -d '{"text": "Deployment finished with status: ${{ job.status }}"}' \
+        -d "{\"text\": \"${STATUS_EMOJI} Deployment Status: ${{ job.status }}\nRevision: ${NEW_REVISION}\"}" \
         ${{ secrets.SLACK_WEBHOOK_URL }}
 
