@@ -206,7 +206,7 @@ jobs:
             --to-revisions=$CURRENT_REVISION=100
         fi
 
-      - name: Notify Deployment Status
+    - name: Notify Deployment Status
       if: always()
       run: |
         curl -X POST -H "Content-Type: application/json" \
