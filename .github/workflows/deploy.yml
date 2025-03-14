@@ -166,23 +166,34 @@ jobs:
       run: |
         NEW_REVISION="${{ env.SERVICE_NAME }}-${{ env.REVISION_SUFFIX }}"
         
-        # Verify revision is ready
-        READY_STATUS=$(gcloud run revisions describe $NEW_REVISION \
+        # Get detailed revision status
+        echo "Getting detailed revision status..."
+        REVISION_STATUS=$(gcloud run revisions describe $NEW_REVISION \
           --region=${{ env.REGION }} \
-          --format="value(status.conditions[?(@.type=='Ready')].status)")
+          --format="yaml")
+        
+        echo "Full revision status:"
+        echo "$REVISION_STATUS"
+        
+        # Check ready condition
+        READY_STATUS=$(echo "$REVISION_STATUS" | yq '.status.conditions[] | select(.type=="Ready") | .status')
+        READY_MESSAGE=$(echo "$REVISION_STATUS" | yq '.status.conditions[] | select(.type=="Ready") | .message')
         
         if [ "$READY_STATUS" != "True" ]; then
-          echo "New revision is not ready. Status: $READY_STATUS"
+          echo "New revision is not ready."
+          echo "Status message: $READY_MESSAGE"
+          echo "Full conditions:"
+          echo "$REVISION_STATUS" | yq '.status.conditions'
           exit 1
         fi
         
-        # Verify container is healthy
-        CONTAINER_STATUS=$(gcloud run revisions describe $NEW_REVISION \
-          --region=${{ env.REGION }} \
-          --format="value(status.conditions[?(@.type=='ContainerHealthy')].status)")
+        # Check container health
+        CONTAINER_STATUS=$(echo "$REVISION_STATUS" | yq '.status.conditions[] | select(.type=="ContainerHealthy") | .status')
+        CONTAINER_MESSAGE=$(echo "$REVISION_STATUS" | yq '.status.conditions[] | select(.type=="ContainerHealthy") | .message')
         
         if [ "$CONTAINER_STATUS" != "True" ]; then
-          echo "Container is not healthy. Status: $CONTAINER_STATUS"
+          echo "Container is not healthy."
+          echo "Status message: $CONTAINER_MESSAGE"
           exit 1
         fi
 
