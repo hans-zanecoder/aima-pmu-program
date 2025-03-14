@@ -51,12 +51,13 @@ jobs:
         echo "TIMESTAMP=$TIMESTAMP" >> $GITHUB_ENV
         echo "REVISION_SUFFIX=$REVISION_SUFFIX" >> $GITHUB_ENV
 
-    - name: Build and push Docker image
+    - name: Build and push Docker image in parallel
       env:
         IMAGE_NAME: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TIMESTAMP }}
       run: |
-        docker build -t $IMAGE_NAME .
-        docker push $IMAGE_NAME
+        docker build -t $IMAGE_NAME . &
+        docker push $IMAGE_NAME &
+        wait
 
     - name: Deploy New Revision
       run: |
@@ -103,44 +104,67 @@ jobs:
         echo "NEW_STATE=$NEW_STATE" >> $GITHUB_ENV
         echo "CURRENT_REVISION=$CURRENT_REVISION" >> $GITHUB_ENV
 
-    - name: Test Passive Revision
+    - name: Wait for Service Readiness and Test
       id: test
       run: |
-        sleep 30
         NEW_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
           --format="value(status.url)")
 
-        echo "Testing URL: $NEW_URL"
+        echo "Waiting for service to be ready at $NEW_URL"
 
-        MAX_RETRIES=3
-        RETRY_COUNT=0
-        SUCCESS=false
+        MAX_WAIT_TIME=60  # Max wait time: 60 seconds
+        ELAPSED_TIME=0
 
-        while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
+        while true; do
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$NEW_URL")
 
           if [ "$HTTP_STATUS" -eq 200 ]; then
-            SUCCESS=true
+            echo "Service is ready!"
             echo "status=success" >> $GITHUB_ENV
             break
-          else
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            echo "Attempt $RETRY_COUNT failed with status $HTTP_STATUS"
-            [ $RETRY_COUNT -lt $MAX_RETRIES ] && sleep 10
           fi
+
+          ELAPSED_TIME=$((ELAPSED_TIME + 5))
+          if [ "$ELAPSED_TIME" -ge "$MAX_WAIT_TIME" ]; then
+            echo "Service did not become ready in time."
+            echo "status=failure" >> $GITHUB_ENV
+            exit 1
+          fi
+
+          echo "Service not ready yet, retrying in 5 seconds..."
+          sleep 5
         done
 
-        if [ "$SUCCESS" = false ]; then
-          echo "status=failure" >> $GITHUB_ENV
-          exit 1
-        fi
 
-    - name: Migrate traffic to new revision
+    - name: Gradually Shift Traffic (Canary Deployment)
       if: env.status == 'success'
       run: |
         NEW_REVISION="${{ env.SERVICE_NAME }}-${{ env.REVISION_SUFFIX }}"
-        
+        CURRENT_REVISION=$(gcloud run revisions list \
+          --service=${{ env.SERVICE_NAME }} \
+          --region=${{ env.REGION }} \
+          --filter="traffic_percent>0" \
+          --format="value(metadata.name)" \
+          --limit=1)
+
+        echo "Shifting 10% traffic to new revision..."
+        gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+          --region=${{ env.REGION }} \
+          --to-revisions=$CURRENT_REVISION=90,$NEW_REVISION=10
+
+        echo "Waiting for 2 minutes before increasing traffic..."
+        sleep 120
+
+        echo "Increasing traffic to 50%..."
+        gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+          --region=${{ env.REGION }} \
+          --to-revisions=$CURRENT_REVISION=50,$NEW_REVISION=50
+
+        echo "Waiting for 3 minutes before full rollout..."
+        sleep 180
+
+        echo "Moving 100% traffic to new revision..."
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
           --to-revisions=$NEW_REVISION=100
@@ -181,3 +205,11 @@ jobs:
             --region=${{ env.REGION }} \
             --to-revisions=$CURRENT_REVISION=100
         fi
+
+      - name: Notify Deployment Status
+      if: always()
+      run: |
+        curl -X POST -H "Content-Type: application/json" \
+        -d '{"text": "Deployment finished with status: ${{ job.status }}"}' \
+        ${{ secrets.SLACK_WEBHOOK_URL }}
+
