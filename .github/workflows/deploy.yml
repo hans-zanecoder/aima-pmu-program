@@ -106,35 +106,10 @@ jobs:
     - name: Test Passive Revision
       id: test
       run: |
-        sleep 30
-        NEW_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
-          --region=${{ env.REGION }} \
-          --format="value(status.url)")
-
-        echo "Testing URL: $NEW_URL"
-
-        MAX_RETRIES=3
-        RETRY_COUNT=0
-        SUCCESS=false
-
-        while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$NEW_URL")
-
-          if [ "$HTTP_STATUS" -eq 200 ]; then
-            SUCCESS=true
-            echo "status=success" >> $GITHUB_ENV
-            break
-          else
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            echo "Attempt $RETRY_COUNT failed with status $HTTP_STATUS"
-            [ $RETRY_COUNT -lt $MAX_RETRIES ] && sleep 10
-          fi
-        done
-
-        if [ "$SUCCESS" = false ]; then
-          echo "status=failure" >> $GITHUB_ENV
-          exit 1
-        fi
+        # Force failure for testing
+        echo "Forcing test failure"
+        echo "status=failure" >> $GITHUB_ENV
+        exit 1
 
     - name: Migrate traffic to new revision
       if: env.status == 'success'
