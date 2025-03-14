@@ -136,48 +136,14 @@ jobs:
           sleep 5
         done
 
-
-    - name: Gradually Shift Traffic (Canary Deployment)
+    - name: Migrate traffic to new revision
       if: env.status == 'success'
       run: |
         NEW_REVISION="${{ env.SERVICE_NAME }}-${{ env.REVISION_SUFFIX }}"
-        CURRENT_REVISION=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
-          --region=${{ env.REGION }} \
-          --format="value(status.traffic[0].revisionName)")
-
-        # If no active revision, assign full traffic to new revision
-        if [ -z "$CURRENT_REVISION" ]; then
-          echo "No active revision found. Assigning full traffic to new revision..."
-          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
-            --region=${{ env.REGION }} \
-            --to-revisions="$NEW_REVISION=100"
-          exit 0
-        fi
-
-        echo "Current serving revision: $CURRENT_REVISION"
-        echo "New revision: $NEW_REVISION"
-
-        echo "Shifting 10% traffic to new revision..."
+        
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --to-revisions="$CURRENT_REVISION=90,$NEW_REVISION=10"
-
-        echo "Waiting for 2 minutes before increasing traffic..."
-        sleep 120
-
-        echo "Increasing traffic to 50%..."
-        gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
-          --region=${{ env.REGION }} \
-          --to-revisions="$CURRENT_REVISION=50,$NEW_REVISION=50"
-
-        echo "Waiting for 3 minutes before full rollout..."
-        sleep 180
-
-        echo "Moving 100% traffic to new revision..."
-        gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
-          --region=${{ env.REGION }} \
-          --to-revisions="$NEW_REVISION=100"
-
+          --to-revisions=$NEW_REVISION=100
 
     - name: Cleanup old revisions (keep last 5)
       if: always()
@@ -220,14 +186,13 @@ jobs:
       if: always()
       run: |
         NEW_REVISION="${{ env.SERVICE_NAME }}-${{ env.REVISION_SUFFIX }}"
-        STATUS_EMOJI="✅"
-        STATUS_TEXT="*SUCCESS*"
+        ENVIRONMENT="Production"
+        STATUS="SUCCEEDED"
         if [ "${{ job.status }}" != "success" ]; then
-          STATUS_EMOJI="❌"
-          STATUS_TEXT="*FAILED*"
+          STATUS="FAILED"
         fi
         
         curl -X POST -H "Content-Type: application/json" \
-        -d "{\"text\": \"${STATUS_EMOJI} Deployment Status: ${STATUS_TEXT}\nRevision: *${NEW_REVISION}*\"}" \
+        -d "{\"text\": \"[${ENVIRONMENT}] Deployment ${STATUS}\nService: ${{ env.SERVICE_NAME }}\nRevision: ${NEW_REVISION}\nRegion: ${{ env.REGION }}\"}" \
         ${{ secrets.SLACK_WEBHOOK_URL }}
 
