@@ -195,7 +195,7 @@ jobs:
             --quiet
         fi
 
-      - name: Notify Deployment Status
+    - name: Notify Deployment Status
       if: always()
       run: |
         NEW_REVISION="${{ env.SERVICE_NAME }}-${{ env.REVISION_SUFFIX }}"
