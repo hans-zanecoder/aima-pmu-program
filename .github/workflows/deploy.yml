@@ -61,21 +61,23 @@ jobs:
     - name: Deploy New Revision
       run: |
         # Get current serving revision
-        CURRENT_REVISION=$(gcloud run revisions list \
-          --service=${{ env.SERVICE_NAME }} \
+        CURRENT_REVISION=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --filter="traffic_percent>0" \
-          --format="value(metadata.name)" \
-          --limit=1)
+          --format="value(status.traffic[0].revisionName)")
 
         # Check current deployment state
-        CURRENT_STATE=$(gcloud run revisions describe $CURRENT_REVISION \
-          --region=${{ env.REGION }} \
-          --format="value(labels.state)" || echo "active")
+        if [ -n "$CURRENT_REVISION" ]; then
+          CURRENT_STATE=$(gcloud run revisions describe $CURRENT_REVISION \
+            --region=${{ env.REGION }} \
+            --format="value(labels.state)" || echo "active")
+        else
+          CURRENT_STATE="active"
+        fi
 
-        # Determine new state (if current is active, deploy passive, and vice versa)
+        # Determine new state
         NEW_STATE=$([ "$CURRENT_STATE" = "active" ] && echo "passive" || echo "active")
         
+        # Deploy new revision
         gcloud run deploy ${{ env.SERVICE_NAME }} \
           --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TIMESTAMP }} \
           --region ${{ env.REGION }} \
@@ -92,13 +94,6 @@ jobs:
           --execution-environment gen2 \
           --cpu=1 \
           --set-env-vars STARTUP_CPU_BOOST=true
-
-        # Ensure traffic stays with current revision during testing
-        if [ -n "$CURRENT_REVISION" ]; then
-          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
-            --region=${{ env.REGION }} \
-            --to-revisions=$CURRENT_REVISION=100
-        fi
 
         echo "NEW_STATE=$NEW_STATE" >> $GITHUB_ENV
         echo "CURRENT_REVISION=$CURRENT_REVISION" >> $GITHUB_ENV
@@ -187,12 +182,24 @@ jobs:
       run: |
         NEW_REVISION="${{ env.SERVICE_NAME }}-${{ env.REVISION_SUFFIX }}"
         
-        # Check if the new revision exists
-        if gcloud run revisions describe $NEW_REVISION --region=${{ env.REGION }} &>/dev/null; then
-          echo "Cleaning up failed revision: $NEW_REVISION"
-          gcloud run revisions delete $NEW_REVISION \
-            --region=${{ env.REGION }} \
-            --quiet
+        # Get all revisions
+        REVISIONS=$(gcloud run revisions list \
+          --service=${{ env.SERVICE_NAME }} \
+          --region=${{ env.REGION }} \
+          --format="value(metadata.name)")
+        
+        # Check if there are other revisions before deleting
+        REVISION_COUNT=$(echo "$REVISIONS" | wc -l)
+        
+        if [ "$REVISION_COUNT" -gt 1 ]; then
+          if gcloud run revisions describe $NEW_REVISION --region=${{ env.REGION }} &>/dev/null; then
+            echo "Cleaning up failed revision: $NEW_REVISION"
+            gcloud run revisions delete $NEW_REVISION \
+              --region=${{ env.REGION }} \
+              --quiet || true
+          fi
+        else
+          echo "Cannot delete the only revision. Skipping cleanup."
         fi
 
     - name: Notify Deployment Status
@@ -200,11 +207,13 @@ jobs:
       run: |
         NEW_REVISION="${{ env.SERVICE_NAME }}-${{ env.REVISION_SUFFIX }}"
         ENVIRONMENT="Production"
-        STATUS="SUCCEEDED"
+        STATUS="*SUCCEEDED*"
         if [ "${{ job.status }}" != "success" ]; then
-          STATUS="FAILED"
+          STATUS="*FAILED*"
         fi
         
+        COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+        
         curl -X POST -H "Content-Type: application/json" \
-        -d "{\"text\": \"[${ENVIRONMENT}] Deployment ${STATUS}\nService: ${{ env.SERVICE_NAME }}\nRevision: ${NEW_REVISION}\nRegion: ${{ env.REGION }}\"}" \
+        -d "{\"text\": \"[${ENVIRONMENT}] *Deployment* ${STATUS}\n*Service:* ${{ env.SERVICE_NAME }}\n*Revision:* ${NEW_REVISION}\n*Region:* ${{ env.REGION }}\n*Commit:* *${COMMIT_MSG}*\"}" \
         ${{ secrets.SLACK_WEBHOOK_URL }}
