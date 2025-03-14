@@ -141,12 +141,18 @@ jobs:
       if: env.status == 'success'
       run: |
         NEW_REVISION="${{ env.SERVICE_NAME }}-${{ env.REVISION_SUFFIX }}"
-        CURRENT_REVISION=$(gcloud run revisions list \
-          --service=${{ env.SERVICE_NAME }} \
+        CURRENT_REVISION=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --filter="serving=true" \
-          --format="value(metadata.name)" \
-          --limit=1)
+          --format="value(status.traffic[0].revisionName)")
+
+        # If no active revision, assign full traffic to new revision
+        if [ -z "$CURRENT_REVISION" ]; then
+          echo "No active revision found. Assigning full traffic to new revision..."
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --to-revisions="$NEW_REVISION=100"
+          exit 0
+        fi
 
         echo "Current serving revision: $CURRENT_REVISION"
         echo "New revision: $NEW_REVISION"
@@ -154,7 +160,7 @@ jobs:
         echo "Shifting 10% traffic to new revision..."
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --to-revisions $NEW_REVISION=10,$CURRENT_REVISION=90
+          --to-revisions="$CURRENT_REVISION=90,$NEW_REVISION=10"
 
         echo "Waiting for 2 minutes before increasing traffic..."
         sleep 120
@@ -162,7 +168,7 @@ jobs:
         echo "Increasing traffic to 50%..."
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --to-revisions $NEW_REVISION=50,$CURRENT_REVISION=50
+          --to-revisions="$CURRENT_REVISION=50,$NEW_REVISION=50"
 
         echo "Waiting for 3 minutes before full rollout..."
         sleep 180
@@ -170,7 +176,8 @@ jobs:
         echo "Moving 100% traffic to new revision..."
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --to-revisions $NEW_REVISION=100
+          --to-revisions="$NEW_REVISION=100"
+
 
     - name: Cleanup old revisions (keep last 5)
       if: always()
