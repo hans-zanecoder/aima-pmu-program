@@ -144,14 +144,17 @@ jobs:
         CURRENT_REVISION=$(gcloud run revisions list \
           --service=${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --filter="traffic_percent>0" \
+          --filter="serving=true" \
           --format="value(metadata.name)" \
           --limit=1)
+
+        echo "Current serving revision: $CURRENT_REVISION"
+        echo "New revision: $NEW_REVISION"
 
         echo "Shifting 10% traffic to new revision..."
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --to-revisions="${CURRENT_REVISION}=90,${NEW_REVISION}=10"
+          --to-revisions $NEW_REVISION=10,$CURRENT_REVISION=90
 
         echo "Waiting for 2 minutes before increasing traffic..."
         sleep 120
@@ -159,7 +162,7 @@ jobs:
         echo "Increasing traffic to 50%..."
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --to-revisions="${CURRENT_REVISION}=50,${NEW_REVISION}=50"
+          --to-revisions $NEW_REVISION=50,$CURRENT_REVISION=50
 
         echo "Waiting for 3 minutes before full rollout..."
         sleep 180
@@ -167,7 +170,7 @@ jobs:
         echo "Moving 100% traffic to new revision..."
         gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
-          --to-revisions="${NEW_REVISION}=100"
+          --to-revisions $NEW_REVISION=100
 
     - name: Cleanup old revisions (keep last 5)
       if: always()
@@ -211,11 +214,13 @@ jobs:
       run: |
         NEW_REVISION="${{ env.SERVICE_NAME }}-${{ env.REVISION_SUFFIX }}"
         STATUS_EMOJI="✅"
+        STATUS_TEXT="*SUCCESS*"
         if [ "${{ job.status }}" != "success" ]; then
           STATUS_EMOJI="❌"
+          STATUS_TEXT="*FAILED*"
         fi
         
         curl -X POST -H "Content-Type: application/json" \
-        -d "{\"text\": \"${STATUS_EMOJI} Deployment Status: ${{ job.status }}\nRevision: ${NEW_REVISION}\"}" \
+        -d "{\"text\": \"${STATUS_EMOJI} Deployment Status: ${STATUS_TEXT}\nRevision: *${NEW_REVISION}*\"}" \
         ${{ secrets.SLACK_WEBHOOK_URL }}
 
