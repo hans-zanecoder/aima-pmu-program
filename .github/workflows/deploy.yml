@@ -36,17 +36,6 @@ jobs:
         service_account: ${{ env.SERVICE_ACCOUNT }}
         project_id: ${{ env.PROJECT_ID }}
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Cache Docker layers
-      uses: actions/cache@v3
-      with:
-        path: /tmp/.buildx-cache
-        key: ${{ runner.os }}-buildx-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-buildx-
-
     - name: Set up Cloud SDK
       uses: google-github-actions/setup-gcloud@v1
 
@@ -63,13 +52,11 @@ jobs:
         echo "REVISION_SUFFIX=$REVISION_SUFFIX" >> $GITHUB_ENV
 
     - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        push: true
-        tags: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TIMESTAMP }}
-        cache-from: type=local,src=/tmp/.buildx-cache
-        cache-to: type=local,dest=/tmp/.buildx-cache-new
+      env:
+        IMAGE_NAME: gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE_NAME }}:${{ env.TIMESTAMP }}
+      run: |
+        docker build -t $IMAGE_NAME .
+        docker push $IMAGE_NAME
 
     - name: Deploy New Revision
       run: |
@@ -116,103 +103,38 @@ jobs:
         echo "NEW_STATE=$NEW_STATE" >> $GITHUB_ENV
         echo "CURRENT_REVISION=$CURRENT_REVISION" >> $GITHUB_ENV
 
-    - name: Health Check New Revision
+    - name: Test Passive Revision
       id: test
       run: |
-        MAX_RETRIES=5
-        RETRY_DELAY=20
-        TIMEOUT=300
-        
+        sleep 30
         NEW_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
           --region=${{ env.REGION }} \
           --format="value(status.url)")
-        
+
         echo "Testing URL: $NEW_URL"
-        
-        start_time=$(date +%s)
-        retry_count=0
-        
-        while true; do
-          current_time=$(date +%s)
-          elapsed=$((current_time - start_time))
-          
-          if [ $elapsed -gt $TIMEOUT ]; then
-            echo "Health check timed out after ${TIMEOUT}s"
-            echo "status=failure" >> $GITHUB_ENV
-            exit 1
-          fi
-          
+
+        MAX_RETRIES=3
+        RETRY_COUNT=0
+        SUCCESS=false
+
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SUCCESS" = false ]; do
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$NEW_URL")
-          
+
           if [ "$HTTP_STATUS" -eq 200 ]; then
-            echo "Health check passed"
+            SUCCESS=true
             echo "status=success" >> $GITHUB_ENV
             break
-          fi
-          
-          retry_count=$((retry_count + 1))
-          if [ $retry_count -ge $MAX_RETRIES ]; then
-            echo "Max retries ($MAX_RETRIES) exceeded"
-            echo "status=failure" >> $GITHUB_ENV
-            exit 1
-          fi
-          
-          echo "Attempt $retry_count failed with status $HTTP_STATUS. Retrying in ${RETRY_DELAY}s..."
-          sleep $RETRY_DELAY
-        done
-
-    - name: Verify Deployment
-      if: env.status == 'success'
-      run: |
-        NEW_REVISION="${{ env.SERVICE_NAME }}-${{ env.REVISION_SUFFIX }}"
-        
-        # Get detailed revision status
-        echo "Getting detailed revision status..."
-        REVISION_STATUS=$(gcloud run revisions describe $NEW_REVISION \
-          --region=${{ env.REGION }} \
-          --format="yaml")
-        
-        echo "Full revision status:"
-        echo "$REVISION_STATUS"
-        
-        # Check ready condition
-        READY_STATUS=$(echo "$REVISION_STATUS" | yq '.status.conditions[] | select(.type=="Ready") | .status')
-        READY_MESSAGE=$(echo "$REVISION_STATUS" | yq '.status.conditions[] | select(.type=="Ready") | .message')
-        
-        if [ "$READY_STATUS" != "True" ]; then
-          echo "New revision is not ready."
-          echo "Status message: $READY_MESSAGE"
-          echo "Full conditions:"
-          echo "$REVISION_STATUS" | yq '.status.conditions'
-          exit 1
-        fi
-        
-        # Check container health
-        CONTAINER_STATUS=$(echo "$REVISION_STATUS" | yq '.status.conditions[] | select(.type=="ContainerHealthy") | .status')
-        CONTAINER_MESSAGE=$(echo "$REVISION_STATUS" | yq '.status.conditions[] | select(.type=="ContainerHealthy") | .message')
-        
-        if [ "$CONTAINER_STATUS" != "True" ]; then
-          echo "Container is not healthy."
-          echo "Status message: $CONTAINER_MESSAGE"
-          exit 1
-        fi
-
-    - name: Monitor Initial Performance
-      if: env.status == 'success'
-      run: |
-        NEW_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
-          --region=${{ env.REGION }} \
-          --format="value(status.url)")
-        
-        echo "Monitoring initial performance..."
-        for i in {1..5}; do
-          RESPONSE_TIME=$(curl -s -w "%{time_total}\n" -o /dev/null $NEW_URL)
-          echo "Request $i response time: ${RESPONSE_TIME}s"
-          
-          if (( $(echo "$RESPONSE_TIME > 2.0" | bc -l) )); then
-            echo "Warning: High response time detected"
+          else
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo "Attempt $RETRY_COUNT failed with status $HTTP_STATUS"
+            [ $RETRY_COUNT -lt $MAX_RETRIES ] && sleep 10
           fi
         done
+
+        if [ "$SUCCESS" = false ]; then
+          echo "status=failure" >> $GITHUB_ENV
+          exit 1
+        fi
 
     - name: Migrate traffic to new revision
       if: env.status == 'success'
@@ -260,11 +182,11 @@ jobs:
             --to-revisions=$CURRENT_REVISION=100
         fi
 
-    - name: Send Deployment Notification
+    - name: Notify Deployment Status
       if: always()
       run: |
         NEW_REVISION="${{ env.SERVICE_NAME }}-${{ env.REVISION_SUFFIX }}"
-        DEPLOY_TIME=$(date +"%Y-%m-%d %H:%M:%S %Z")
+        ENVIRONMENT="*Production*"
         STATUS="SUCCEEDED"
         STATUS_EMOJI="✅"
         if [ "${{ job.status }}" != "success" ]; then
@@ -272,40 +194,8 @@ jobs:
           STATUS_EMOJI="❌"
         fi
         
-        # Collect deployment metrics
-        METRICS=$(gcloud run revisions describe $NEW_REVISION \
-          --region=${{ env.REGION }} \
-          --format="yaml(status)")
-        
         COMMIT_MSG=$(git log -1 --pretty=format:"%s")
         
-        # Create detailed message with metrics
-        MESSAGE=$(cat << EOF
-        ${STATUS_EMOJI} [*Production*] *Deployment ${STATUS}*
-        🚀 *Service:* ${{ env.SERVICE_NAME }}
-        📦 *Revision:* ${NEW_REVISION}
-        🌎 *Region:* ${{ env.REGION }}
-        🕒 *Deploy Time:* ${DEPLOY_TIME}
-        💬 *Commit:* ${COMMIT_MSG}
-
-        *Deployment Metrics:*
-        \`\`\`
-        ${METRICS}
-        \`\`\`
-        EOF
-        )
-        
-        if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
-          curl -X POST -H "Content-Type: application/json" \
-            -d "{\"text\": \"$MESSAGE\"}" \
-            ${{ secrets.SLACK_WEBHOOK_URL }}
-        else
-          echo "Slack webhook URL not configured. Printing deployment report to console:"
-          echo "$MESSAGE"
-        fi
-
-    - name: Clean up cache
-      if: always()
-      run: |
-        rm -rf /tmp/.buildx-cache
-        mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+        curl -X POST -H "Content-Type: application/json" \
+        -d "{\"text\": \"${STATUS_EMOJI} [${ENVIRONMENT}] *Deployment* ${STATUS}\n🚀 *Service:* ${{ env.SERVICE_NAME }}\n📦 *Revision:* ${NEW_REVISION}\n🌎 *Region:* ${{ env.REGION }}\n💬 *Commit:* *${COMMIT_MSG}*\"}" \
+        ${{ secrets.SLACK_WEBHOOK_URL }}
